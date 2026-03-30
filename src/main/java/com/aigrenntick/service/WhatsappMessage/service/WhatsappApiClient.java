@@ -1,5 +1,6 @@
 package com.aigrenntick.service.WhatsappMessage.service;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -26,8 +27,8 @@ import reactor.core.publisher.Mono;
 @Component
 public class WhatsappApiClient {
 
-    private static final int    TIMEOUT_SECONDS   = 600;
-    private static final String META_API_BASE_URL = "https://graph.facebook.com/v23.0";
+    private static final int    TIMEOUT_SECONDS   = 600;   // matches PHP $timeout = 600
+    private static final String META_API_BASE_URL = "https://graph.facebook.com/v19.0"; // ← fixed: matches PHP v19.0
 
     private final WebClient webClient;
 
@@ -51,6 +52,7 @@ public class WhatsappApiClient {
                     return buildRequest(recipient, config, url)
                             .retrieve()
                             .toEntity(Map.class)
+                            .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
                             .map(resp -> {
                                 logTiming(recipient.getNumber(), startTimes);
 
@@ -69,7 +71,7 @@ public class WhatsappApiClient {
 
         return Flux.merge(monos)
                 .collectList()
-                .block(java.time.Duration.ofSeconds(TIMEOUT_SECONDS));
+                .block(Duration.ofSeconds(TIMEOUT_SECONDS));
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -89,11 +91,9 @@ public class WhatsappApiClient {
         WebClient.RequestBodySpec spec = webClient.post().uri(url);
 
         if (Boolean.TRUE.equals(recipient.getWithCreditLine())) {
-            // Pinnacle credit-line flow
             spec = spec.header("apikey", recipient.getPinnacleApiKey())
                        .header("Content-Type", "application/json");
         } else {
-            // Standard Meta Bearer token flow
             spec = spec.header("Authorization", "Bearer " + config.getPermanentToken())
                        .header("Content-Type", "application/json");
         }
@@ -132,11 +132,6 @@ public class WhatsappApiClient {
         log.info("[{}] WhatsApp API time: {} ms", number, elapsed);
     }
 
-    /**
-     * Safe extractor for Map<?,?> — getOrDefault(String, T) is a compile error
-     * on Map<?,?> because key type is unknown wildcard (?).
-     * map.get(Object) accepts any key type, so we use get() + null-check.
-     */
     private String extractString(Map<?, ?> map, String key, String defaultVal) {
         if (map == null) return defaultVal;
         Object val = map.get(key);
