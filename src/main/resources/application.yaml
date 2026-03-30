@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: WhatsappMessage
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/aigreentick
+    username: root
+    password: meenagaming12@#
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
