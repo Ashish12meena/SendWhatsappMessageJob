@@ -13,8 +13,8 @@ import java.util.List;
  *
  * POST /internal/broadcast/callbacks/message-results
  *
- * Sent once per window (every 80 recipients).
- * This service performs a bulk UPDATE for all results in one call.
+ * Sent once per window (~50 recipients).
+ * Report rows are located by broadcastId + mobile — no campaignId needed.
  */
 @Data
 @Builder
@@ -22,8 +22,6 @@ import java.util.List;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MessageResultCallbackRequest {
-
-    private Long campaignId;
 
     private String phoneNumberId;
 
@@ -59,7 +57,6 @@ public class MessageResultCallbackRequest {
 
         /** Populated when success=false */
         private String errorCode;
-
         private String errorMessage;
     }
 }

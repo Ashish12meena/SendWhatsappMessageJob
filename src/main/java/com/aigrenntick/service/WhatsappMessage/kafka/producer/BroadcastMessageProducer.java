@@ -14,9 +14,9 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Publishes broadcast batches to Kafka topic: whatsapp.messages.outbound
+ * Publishes broadcast batches to Kafka topic: whatsapp.broadcast.dispatch
  *
- * Key:   wabaAccountId (= whatsappNoId) — ensures partition affinity
+ * Key:   wabaAccountId (= phoneNumberId) — ensures partition affinity per phone number
  * Value: BroadcastMessageOutboundEvent as JSON
  *
  * Splits large recipient lists into batches of configurable size (default 1000).
@@ -29,7 +29,7 @@ public class BroadcastMessageProducer {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
-    @Value("${kafka.topics.outbound-messages:whatsapp.messages.outbound}")
+    @Value("${kafka.topics.outbound-messages:whatsapp.broadcast.dispatch}")
     private String outboundTopic;
 
     @Value("${broadcast.batch-size:1000}")
@@ -45,21 +45,19 @@ public class BroadcastMessageProducer {
         List<BroadcastMessageOutboundEvent.RecipientPayloadDto> allPayloads = event.getPayloads();
 
         if (allPayloads == null || allPayloads.isEmpty()) {
-            log.warn("No payloads to publish for campaignId={}", event.getCampaignId());
+            log.warn("No payloads to publish for wabaAccountId={}", event.getWabaAccountId());
             return;
         }
 
-        // Partition into batches of batchSize
         List<List<BroadcastMessageOutboundEvent.RecipientPayloadDto>> batches = partition(allPayloads, batchSize);
 
-        log.info("Publishing {} Kafka batches for campaignId={} wabaAccountId={} totalRecipients={}",
-                batches.size(), event.getCampaignId(), event.getWabaAccountId(), allPayloads.size());
+        log.info("Publishing {} Kafka batches for wabaAccountId={} totalRecipients={}",
+                batches.size(), event.getWabaAccountId(), allPayloads.size());
 
         for (int i = 0; i < batches.size(); i++) {
             List<BroadcastMessageOutboundEvent.RecipientPayloadDto> batch = batches.get(i);
 
             BroadcastMessageOutboundEvent batchEvent = BroadcastMessageOutboundEvent.builder()
-                    .campaignId(event.getCampaignId())
                     .wabaAccountId(event.getWabaAccountId())
                     .accessToken(event.getAccessToken())
                     .payloads(batch)
@@ -72,25 +70,25 @@ public class BroadcastMessageProducer {
     private void publishSingleBatch(BroadcastMessageOutboundEvent batchEvent, int batchNumber, int totalBatches) {
         try {
             String json = objectMapper.writeValueAsString(batchEvent);
-            String key = batchEvent.getWabaAccountId(); // Partition key = phoneNumberId
+            String key = batchEvent.getWabaAccountId();
 
             CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(outboundTopic, key, json);
 
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
-                    log.error("Failed to publish batch {}/{} for campaignId={}: {}",
-                            batchNumber, totalBatches, batchEvent.getCampaignId(), ex.getMessage());
+                    log.error("Failed to publish batch {}/{} for wabaAccountId={}: {}",
+                            batchNumber, totalBatches, batchEvent.getWabaAccountId(), ex.getMessage());
                 } else {
-                    log.info("Published batch {}/{} for campaignId={} to partition={} offset={}",
-                            batchNumber, totalBatches, batchEvent.getCampaignId(),
+                    log.info("Published batch {}/{} for wabaAccountId={} to partition={} offset={}",
+                            batchNumber, totalBatches, batchEvent.getWabaAccountId(),
                             result.getRecordMetadata().partition(),
                             result.getRecordMetadata().offset());
                 }
             });
 
         } catch (Exception e) {
-            log.error("Failed to serialize batch {}/{} for campaignId={}: {}",
-                    batchNumber, totalBatches, batchEvent.getCampaignId(), e.getMessage(), e);
+            log.error("Failed to serialize batch {}/{} for wabaAccountId={}: {}",
+                    batchNumber, totalBatches, batchEvent.getWabaAccountId(), e.getMessage(), e);
         }
     }
 

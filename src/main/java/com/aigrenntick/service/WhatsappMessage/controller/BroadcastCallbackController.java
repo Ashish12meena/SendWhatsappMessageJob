@@ -16,8 +16,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * POST /internal/broadcast/callbacks/message-results
  *
- * Called once per window (every 80 recipients) by the Broadcast Service.
- * Performs a single bulk UPDATE for all results in this callback.
+ * Called once per window (~50 recipients) by the Broadcast Service.
+ * Performs a bulk UPDATE for all results in this callback.
  *
  * This endpoint should NOT be exposed externally — internal service-to-service only.
  */
@@ -33,23 +33,22 @@ public class BroadcastCallbackController {
     public ResponseEntity<Map<String, Object>> receiveMessageResults(
             @RequestBody MessageResultCallbackRequest request) {
 
-        log.info("Received callback: campaignId={} phoneNumberId={} results={}",
-                request.getCampaignId(),
+        log.info("Received callback: phoneNumberId={} results={}",
                 request.getPhoneNumberId(),
                 request.getResults() != null ? request.getResults().size() : 0);
 
         if (request.getResults() == null || request.getResults().isEmpty()) {
             return ResponseEntity.ok(Map.of(
                     "message", "No results to process",
-                    "campaignId", request.getCampaignId()
+                    "phoneNumberId", request.getPhoneNumberId()
             ));
         }
 
-        reportUpdater.bulkUpdateFromCallback(request.getCampaignId(), request.getResults());
+        reportUpdater.bulkUpdateFromCallback(request.getResults());
 
         return ResponseEntity.ok(Map.of(
                 "message", "Results processed",
-                "campaignId", request.getCampaignId(),
+                "phoneNumberId", request.getPhoneNumberId(),
                 "resultsProcessed", request.getResults().size()
         ));
     }

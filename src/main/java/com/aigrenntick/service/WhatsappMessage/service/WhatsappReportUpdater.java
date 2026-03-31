@@ -16,12 +16,9 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Persists WhatsApp send results back to the reports table.
  *
- * Now triggered by HTTP callbacks from Broadcast Service (per-window, 80 results each)
- * instead of being called inline after direct Meta API calls.
- *
- * Uses JPA @Modifying query via ReportRepository.
- * All updates run inside a single @Transactional block so Hibernate batches
- * them efficiently (when hibernate.jdbc.batch_size is configured).
+ * Triggered by HTTP callbacks from Broadcast Service (per-window, ~50 results each).
+ * Report rows are located by broadcastId + mobile — the two identifiers that
+ * flow end-to-end from the original request through Kafka through to here.
  */
 @Slf4j
 @Component
@@ -32,13 +29,15 @@ public class WhatsappReportUpdater {
 
     /**
      * Bulk update reports from Broadcast Service callback results.
-     * Called once per window (every 80 recipients).
+     * Called once per window (~50 recipients).
+     * All updates run in a single transaction so Hibernate batches them
+     * efficiently (when hibernate.jdbc.batch_size is configured).
      */
     @Transactional
-    public void bulkUpdateFromCallback(Long campaignId, List<MessageResultCallbackRequest.RecipientResultDto> results) {
+    public void bulkUpdateFromCallback(List<MessageResultCallbackRequest.RecipientResultDto> results) {
         try {
-            log.info("Executing bulk UPDATE for {} recipients (campaignId={}) at {}",
-                    results.size(), campaignId,
+            log.info("Executing bulk UPDATE for {} recipients at {}",
+                    results.size(),
                     LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss.SSS")));
 
             int updated = 0;
@@ -76,7 +75,7 @@ public class WhatsappReportUpdater {
                         r.getMobile(),
                         messageId,
                         messageStatus,
-                        null, // waId — not provided in callback, can be added if needed
+                        null, // waId — not provided in callback
                         status,
                         r.getPayload()
                 );
@@ -94,7 +93,7 @@ public class WhatsappReportUpdater {
                     LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss.SSS")));
 
         } catch (Exception e) {
-            log.error("SQL Error during bulk update for campaignId={}: {}", campaignId, e.getMessage(), e);
+            log.error("SQL error during bulk update: {}", e.getMessage(), e);
         }
     }
 }

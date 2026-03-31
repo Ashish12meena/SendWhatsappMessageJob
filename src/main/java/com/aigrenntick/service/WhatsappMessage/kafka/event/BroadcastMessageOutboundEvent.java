@@ -9,13 +9,17 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 /**
- * Kafka event published to topic: whatsapp.messages.outbound
+ * Kafka event published to topic: whatsapp.broadcast.dispatch
  *
- * Key:   whatsappNoId (= phoneNumberId in broadcast service)
+ * Key:   wabaAccountId (= phoneNumberId in broadcast service)
  * Value: this object serialized as JSON
  *
- * Contains a batch of up to 1000 recipients for one campaign,
- * one phone number, with pre-built Meta API payloads.
+ * Contains a batch of up to 1000 recipients for one phone number,
+ * with pre-built Meta API payloads.
+ *
+ * No campaignId — each recipient carries its own broadcastId which is
+ * the only identifier needed for report updates.  The queue in Broadcast
+ * Service is keyed purely by phoneNumberId.
  */
 @Data
 @Builder
@@ -24,15 +28,11 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class BroadcastMessageOutboundEvent {
 
-    /** Campaign/broadcast identifier — used for callback correlation */
-    private Long campaignId;
-
     /**
      * The sending phone number ID registered with Meta.
      * This is WabaConfig.whatsappNoId from the messaging service.
      * Broadcast service uses this as phoneNumberId for everything:
      *   - PhoneQueue key
-     *   - Semaphore key
      *   - Meta API path param: POST /{phoneNumberId}/messages
      */
     private String wabaAccountId;
@@ -56,10 +56,10 @@ public class BroadcastMessageOutboundEvent {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RecipientPayloadDto {
 
-        /** Broadcast ID — needed for report update callback */
+        /** Broadcast ID — used for report update callback */
         private Long broadcastId;
 
-        /** Phone number — needed for report update callback (matches reports.mobile) */
+        /** Phone number — used for report update callback (matches reports.mobile) */
         private String mobile;
 
         /**
