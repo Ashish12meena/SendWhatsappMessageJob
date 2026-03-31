@@ -13,14 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Publishes broadcast batches to Kafka topic: whatsapp.broadcast.dispatch
- *
- * Key:   wabaAccountId (= phoneNumberId) — ensures partition affinity per phone number
- * Value: BroadcastMessageOutboundEvent as JSON
- *
- * Splits large recipient lists into batches of configurable size (default 1000).
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -35,12 +27,6 @@ public class BroadcastMessageProducer {
     @Value("${broadcast.batch-size:1000}")
     private int batchSize;
 
-    /**
-     * Publishes recipient batches to Kafka.
-     * Splits into chunks of batchSize and publishes each as a separate Kafka message.
-     *
-     * @param event the full event (may contain >1000 recipients)
-     */
     public void publishBatches(BroadcastMessageOutboundEvent event) {
         List<BroadcastMessageOutboundEvent.RecipientPayloadDto> allPayloads = event.getPayloads();
 
@@ -51,16 +37,14 @@ public class BroadcastMessageProducer {
 
         List<List<BroadcastMessageOutboundEvent.RecipientPayloadDto>> batches = partition(allPayloads, batchSize);
 
-        log.info("Publishing {} Kafka batches for wabaAccountId={} totalRecipients={}",
-                batches.size(), event.getWabaAccountId(), allPayloads.size());
+        log.info("Publishing {} Kafka batches for wabaAccountId={} totalRecipients={} topic={}",
+                batches.size(), event.getWabaAccountId(), allPayloads.size(), outboundTopic);
 
         for (int i = 0; i < batches.size(); i++) {
-            List<BroadcastMessageOutboundEvent.RecipientPayloadDto> batch = batches.get(i);
-
             BroadcastMessageOutboundEvent batchEvent = BroadcastMessageOutboundEvent.builder()
                     .wabaAccountId(event.getWabaAccountId())
                     .accessToken(event.getAccessToken())
-                    .payloads(batch)
+                    .payloads(batches.get(i))
                     .build();
 
             publishSingleBatch(batchEvent, i + 1, batches.size());
@@ -72,6 +56,8 @@ public class BroadcastMessageProducer {
             String json = objectMapper.writeValueAsString(batchEvent);
             String key = batchEvent.getWabaAccountId();
 
+            log.info("Publishing batch {}/{} to topic={} key={}", batchNumber, totalBatches, outboundTopic, key);
+
             CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(outboundTopic, key, json);
 
             future.whenComplete((result, ex) -> {
@@ -79,8 +65,9 @@ public class BroadcastMessageProducer {
                     log.error("Failed to publish batch {}/{} for wabaAccountId={}: {}",
                             batchNumber, totalBatches, batchEvent.getWabaAccountId(), ex.getMessage());
                 } else {
-                    log.info("Published batch {}/{} for wabaAccountId={} to partition={} offset={}",
+                    log.info("Published batch {}/{} for wabaAccountId={} to topic={} partition={} offset={}",
                             batchNumber, totalBatches, batchEvent.getWabaAccountId(),
+                            outboundTopic,
                             result.getRecordMetadata().partition(),
                             result.getRecordMetadata().offset());
                 }

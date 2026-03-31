@@ -62,10 +62,7 @@ spring:
 # ── Kafka Topics ───────────────────────────────────────────────────────
 kafka:
   topics:
-    outbound-messages:
-      name: whatsapp.broadcast.dispatch
-      partitions: 3
-      replicas: 1
+    outbound-messages: whatsapp.broadcast.dispatch   
 
 # ── Broadcast Batch Config ─────────────────────────────────────────────
 # Max recipients per Kafka message. Broadcast Service processes each
