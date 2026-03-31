@@ -27,6 +27,8 @@ spring:
 
   # ── Kafka Producer Configuration ─────────────────────────────────────
   kafka:
+    admin:
+      auto-create: true
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
     producer:
@@ -60,7 +62,10 @@ spring:
 # ── Kafka Topics ───────────────────────────────────────────────────────
 kafka:
   topics:
-    outbound-messages: whatsapp.broadcast.dispatch
+    outbound-messages:
+      name: whatsapp.broadcast.dispatch
+      partitions: 3
+      replicas: 1
 
 # ── Broadcast Batch Config ─────────────────────────────────────────────
 # Max recipients per Kafka message. Broadcast Service processes each
