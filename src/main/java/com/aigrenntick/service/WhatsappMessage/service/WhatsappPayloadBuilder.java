@@ -17,25 +17,25 @@ import lombok.extern.slf4j.Slf4j;
  * Responsible for building the WhatsApp template API payload per recipient.
  *
  * Handles four cases:
- *   1. Carousel template  → carousel cards with images, body vars, buttons
- *   2. Media template     → header (image/video/doc) + body
- *   3. Authentication     → body (OTP) + URL button
- *   4. Plain              → body only
+ * 1. Carousel template → carousel cards with images, body vars, buttons
+ * 2. Media template → header (image/video/doc) + body
+ * 3. Authentication → body (OTP) + URL button
+ * 4. Plain → body only
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class WhatsappPayloadBuilder {
 
-    private final WhatsappMediaService mediaService;
+    // private final WhatsappMediaService mediaService;
 
     // ════════════════════════════════════════════════════════════════════════
-    //  ENTRY POINT
+    // ENTRY POINT
     // ════════════════════════════════════════════════════════════════════════
 
     public Map<String, Object> buildPayload(Recipient recipient, WabaConfig config) {
 
-        List<Map<String, Object>> components    = new ArrayList<>();
+        List<Map<String, Object>> components = new ArrayList<>();
         List<Map<String, String>> bodyParameters = buildBodyParameters(recipient.getVariables());
 
         // ── base structure ────────────────────────────────────────────────────
@@ -55,9 +55,9 @@ public class WhatsappPayloadBuilder {
             buildCarouselComponents(components, bodyParameters, recipient.getCarouselCards(), config);
 
             // ── FIX: Enrich DB payload with media_url for carousel images ─────
-            //    PHP does this post-build: injects original image URL into the
-            //    header parameter alongside the uploaded media ID so the DB copy
-            //    retains the source URL for debugging / auditing.
+            // PHP does this post-build: injects original image URL into the
+            // header parameter alongside the uploaded media ID so the DB copy
+            // retains the source URL for debugging / auditing.
             enrichCarouselMediaUrls(payload, recipient.getCarouselCards());
 
         } else {
@@ -68,7 +68,7 @@ public class WhatsappPayloadBuilder {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  CAROUSEL MEDIA_URL ENRICHMENT  (mirrors PHP $dbPayload post-processing)
+    // CAROUSEL MEDIA_URL ENRICHMENT (mirrors PHP $dbPayload post-processing)
     // ════════════════════════════════════════════════════════════════════════
 
     /**
@@ -78,6 +78,7 @@ public class WhatsappPayloadBuilder {
      * retains the original image URL for debugging.
      *
      * PHP code reference:
+     * 
      * <pre>
      *   foreach ($dbPayload['template']['components'] as &$component) {
      *       if ($component['type'] === 'carousel') {
@@ -105,31 +106,37 @@ public class WhatsappPayloadBuilder {
             List<Map<String, Object>> components = (List<Map<String, Object>>) template.get("components");
 
             for (Map<String, Object> component : components) {
-                if (!"carousel".equals(component.get("type"))) continue;
+                if (!"carousel".equals(component.get("type")))
+                    continue;
 
                 List<Map<String, Object>> cards = (List<Map<String, Object>>) component.get("cards");
-                if (cards == null) continue;
+                if (cards == null)
+                    continue;
 
                 for (int cIndex = 0; cIndex < cards.size(); cIndex++) {
-                    if (cIndex >= carouselCards.size()) break;
+                    if (cIndex >= carouselCards.size())
+                        break;
 
                     String imageUrl = carouselCards.get(cIndex).getImageUrl();
-                    if (imageUrl == null || imageUrl.isBlank()) continue;
+                    if (imageUrl == null || imageUrl.isBlank())
+                        continue;
 
                     Map<String, Object> card = cards.get(cIndex);
-                    List<Map<String, Object>> cardComponents =
-                            (List<Map<String, Object>>) card.get("components");
-                    if (cardComponents == null) continue;
+                    List<Map<String, Object>> cardComponents = (List<Map<String, Object>>) card.get("components");
+                    if (cardComponents == null)
+                        continue;
 
                     for (Map<String, Object> cComp : cardComponents) {
-                        if (!"header".equals(cComp.get("type"))) continue;
+                        if (!"header".equals(cComp.get("type")))
+                            continue;
 
-                        List<Map<String, Object>> params =
-                                (List<Map<String, Object>>) cComp.get("parameters");
-                        if (params == null) continue;
+                        List<Map<String, Object>> params = (List<Map<String, Object>>) cComp.get("parameters");
+                        if (params == null)
+                            continue;
 
                         for (Map<String, Object> param : params) {
-                            if (!"image".equals(param.get("type"))) continue;
+                            if (!"image".equals(param.get("type")))
+                                continue;
 
                             Map<String, Object> imageMap = (Map<String, Object>) param.get("image");
                             if (imageMap != null && imageMap.get("id") != null) {
@@ -149,20 +156,20 @@ public class WhatsappPayloadBuilder {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  BODY PARAMETERS  (shared by all branches)
+    // BODY PARAMETERS (shared by all branches)
     // ════════════════════════════════════════════════════════════════════════
 
     private List<Map<String, String>> buildBodyParameters(List<Object> variables) {
         List<Map<String, String>> params = new ArrayList<>();
-        if (variables == null) return params;
+        if (variables == null)
+            return params;
 
         for (Object variable : variables) {
             if (variable instanceof Map) {
                 Map<?, ?> varMap = (Map<?, ?>) variable;
                 params.add(Map.of(
                         "type", "text",
-                        "text", extractString(varMap, "value", "")
-                ));
+                        "text", extractString(varMap, "value", "")));
             } else {
                 params.add(Map.of("type", "text", "text", String.valueOf(variable)));
             }
@@ -171,13 +178,13 @@ public class WhatsappPayloadBuilder {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  BRANCH 1 — CAROUSEL
+    // BRANCH 1 — CAROUSEL
     // ════════════════════════════════════════════════════════════════════════
 
     private void buildCarouselComponents(List<Map<String, Object>> components,
-                                          List<Map<String, String>> bodyParameters,
-                                          List<CarouselCard> carouselCards,
-                                          WabaConfig config) {
+            List<Map<String, String>> bodyParameters,
+            List<CarouselCard> carouselCards,
+            WabaConfig config) {
         List<Map<String, Object>> cards = new ArrayList<>();
 
         for (int i = 0; i < carouselCards.size(); i++) {
@@ -205,33 +212,41 @@ public class WhatsappPayloadBuilder {
     }
 
     private void buildCarouselImageHeader(List<Map<String, Object>> cardComponents,
-                                           CarouselCard card,
-                                           WabaConfig config) {
-        if (card.getImageUrl() == null || card.getImageUrl().isBlank()) return;
+            CarouselCard card,
+            WabaConfig config) {
+        if (card.getImageUrl() == null || card.getImageUrl().isBlank())
+            return;
 
-        String mediaId = mediaService.getMediaId(
-                config.getWhatsappNoId(),
-                config.getPermanentToken(),
-                card.getImageUrl()
-        );
+        // String mediaId = mediaService.getMediaId(
+        // config.getWhatsappNoId(),
+        // config.getPermanentToken(),
+        // card.getImageUrl()
+        // );
 
         // Use mutable maps — enrichCarouselMediaUrls will inject media_url later
-        Map<String, Object> imageMap = new LinkedHashMap<>();
-        imageMap.put("id", mediaId != null ? mediaId : "");
+        // Map<String, Object> imageMap = new LinkedHashMap<>();
+        // imageMap.put("id", mediaId != null ? mediaId : "");
 
-        Map<String, Object> imageParam = new LinkedHashMap<>();
-        imageParam.put("type", "image");
-        imageParam.put("image", imageMap);
+        // Map<String, Object> imageParam = new LinkedHashMap<>();
+        // imageParam.put("type", "image");
+        // imageParam.put("image", imageMap);
 
-        Map<String, Object> header = new LinkedHashMap<>();
-        header.put("type", "header");
-        header.put("parameters", List.of(imageParam));
+        // Map<String, Object> header = new LinkedHashMap<>();
+        // header.put("type", "header");
+        // header.put("parameters", List.of(imageParam));
 
-        cardComponents.add(header);
+        // cardComponents.add(header);
+
+        cardComponents.add(Map.of(
+                "type", "header",
+                "parameters", List.of(Map.of(
+                        "type", "image",
+                        "image", Map.of("link", card.getImageUrl())))));
     }
 
     private void buildCarouselBody(List<Map<String, Object>> cardComponents, CarouselCard card) {
-        if (card.getVariables() == null || card.getVariables().isEmpty()) return;
+        if (card.getVariables() == null || card.getVariables().isEmpty())
+            return;
 
         Map<String, String> sortedVars = new TreeMap<>(card.getVariables());
         List<Map<String, String>> cardParams = sortedVars.values().stream()
@@ -242,7 +257,8 @@ public class WhatsappPayloadBuilder {
     }
 
     private void buildCarouselButtons(List<Map<String, Object>> cardComponents, CarouselCard card) {
-        if (card.getButtons() == null) return;
+        if (card.getButtons() == null)
+            return;
 
         for (int i = 0; i < card.getButtons().size(); i++) {
             CardButton btn = card.getButtons().get(i);
@@ -258,35 +274,35 @@ public class WhatsappPayloadBuilder {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  BRANCH 2/3/4 — STANDARD (media / authentication / plain)
+    // BRANCH 2/3/4 — STANDARD (media / authentication / plain)
     // ════════════════════════════════════════════════════════════════════════
 
     private void buildStandardComponents(List<Map<String, Object>> components,
-                                          List<Map<String, String>> bodyParameters,
-                                          Recipient recipient,
-                                          WabaConfig config) {
+            List<Map<String, String>> bodyParameters,
+            Recipient recipient,
+            WabaConfig config) {
         buildMediaHeader(components, recipient);
         components.add(Map.of("type", "body", "parameters", bodyParameters));
         buildAuthButton(components, bodyParameters, recipient);
     }
 
     private void buildMediaHeader(List<Map<String, Object>> components, Recipient recipient) {
-        if (!Boolean.TRUE.equals(recipient.getIsMedia())) return;
-        if (recipient.getMediaUrl() == null || recipient.getMediaUrl().isBlank()) return;
+        if (!Boolean.TRUE.equals(recipient.getIsMedia()))
+            return;
+        if (recipient.getMediaUrl() == null || recipient.getMediaUrl().isBlank())
+            return;
 
         String mediaType = recipient.getMediaType();
         components.add(Map.of(
                 "type", "header",
                 "parameters", List.of(Map.of(
                         "type", mediaType,
-                        mediaType, Map.of("link", recipient.getMediaUrl())
-                ))
-        ));
+                        mediaType, Map.of("link", recipient.getMediaUrl())))));
     }
 
     private void buildAuthButton(List<Map<String, Object>> components,
-                                  List<Map<String, String>> bodyParameters,
-                                  Recipient recipient) {
+            List<Map<String, String>> bodyParameters,
+            Recipient recipient) {
         if (!"authentication".equalsIgnoreCase(
                 recipient.getTemplateCategory() != null ? recipient.getTemplateCategory().trim() : "")) {
             return;
@@ -297,12 +313,11 @@ public class WhatsappPayloadBuilder {
                 "type", "button",
                 "sub_type", "url",
                 "index", "0",
-                "parameters", List.of(Map.of("type", "text", "text", otp))
-        ));
+                "parameters", List.of(Map.of("type", "text", "text", otp))));
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  BUTTON PARAMETERS
+    // BUTTON PARAMETERS
     // ════════════════════════════════════════════════════════════════════════
 
     private List<Map<String, String>> buildButtonParameters(CardButton btn) {
@@ -311,8 +326,7 @@ public class WhatsappPayloadBuilder {
         switch (btn.getType().toLowerCase()) {
             case "quick_reply" -> params.add(Map.of(
                     "type", "payload",
-                    "payload", btn.getText() != null ? btn.getText() : ""
-            ));
+                    "payload", btn.getText() != null ? btn.getText() : ""));
             case "url" -> {
                 String url = btn.getUrl() != null ? btn.getUrl() : "";
                 if (btn.getVariables() != null) {
@@ -324,19 +338,19 @@ public class WhatsappPayloadBuilder {
             }
             case "phone_number" -> params.add(Map.of(
                     "type", "text",
-                    "text", btn.getPhoneNumber() != null ? btn.getPhoneNumber() : ""
-            ));
+                    "text", btn.getPhoneNumber() != null ? btn.getPhoneNumber() : ""));
         }
 
         return params;
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  HELPER
+    // HELPER
     // ════════════════════════════════════════════════════════════════════════
 
     private String extractString(Map<?, ?> map, String key, String defaultVal) {
-        if (map == null) return defaultVal;
+        if (map == null)
+            return defaultVal;
         Object val = map.get(key);
         return val != null ? String.valueOf(val) : defaultVal;
     }

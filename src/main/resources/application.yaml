@@ -15,3 +15,6 @@ spring:
         jdbc:
           batch_size: 50        # batches N updates into fewer DB round-trips
         order_updates: true     # groups same-table updates together for batching
+
+server:
+  port: 8080
