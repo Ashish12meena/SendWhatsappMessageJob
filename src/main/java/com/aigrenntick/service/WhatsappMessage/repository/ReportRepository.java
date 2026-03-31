@@ -15,11 +15,6 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
 
     Optional<Report> findByBroadcastIdAndMobile(Long broadcastId, String mobile);
 
-    /**
-     * Single-row update used inside the batch loop.
-     * Each call is one UPDATE — but Spring/Hibernate will batch them
-     * when spring.jpa.properties.hibernate.jdbc.batch_size is configured.
-     */
     @Modifying
     @Query("""
             UPDATE Report r

@@ -3,32 +3,25 @@ package com.aigrenntick.service.WhatsappMessage.service;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.aigrenntick.service.WhatsappMessage.dto.Recipient;
-import com.aigrenntick.service.WhatsappMessage.dto.RecipientResult;
+import com.aigrenntick.service.WhatsappMessage.dto.MessageResultCallbackRequest;
 import com.aigrenntick.service.WhatsappMessage.repository.ReportRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Responsible for persisting WhatsApp send results back to the reports table.
+ * Persists WhatsApp send results back to the reports table.
+ *
+ * Now triggered by HTTP callbacks from Broadcast Service (per-window, 80 results each)
+ * instead of being called inline after direct Meta API calls.
  *
  * Uses JPA @Modifying query via ReportRepository.
  * All updates run inside a single @Transactional block so Hibernate batches
  * them efficiently (when hibernate.jdbc.batch_size is configured).
- *
- * Why not the raw CASE...WHEN SQL from PHP?
- *   - The PHP version used raw SQL because Laravel doesn't support bulk CASE updates natively.
- *   - In Spring/JPA we get parameterized queries for free — no SQL injection risk.
- *   - With Hibernate batching enabled, N individual UPDATEs are sent in batches
- *     (e.g., 50 at a time), which is nearly as fast as the single CASE...WHEN
- *     approach for typical broadcast sizes.
  */
 @Slf4j
 @Component
@@ -36,51 +29,72 @@ import lombok.extern.slf4j.Slf4j;
 public class WhatsappReportUpdater {
 
     private final ReportRepository reportRepository;
-    private final ObjectMapper     objectMapper;
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  PUBLIC ENTRY POINT
-    // ════════════════════════════════════════════════════════════════════════
-
+    /**
+     * Bulk update reports from Broadcast Service callback results.
+     * Called once per window (every 80 recipients).
+     */
     @Transactional
-    public void bulkUpdate(List<RecipientResult> results) {
+    public void bulkUpdateFromCallback(Long campaignId, List<MessageResultCallbackRequest.RecipientResultDto> results) {
         try {
-            log.info("Executing bulk UPDATE for {} recipients at {}",
-                    results.size(),
+            log.info("Executing bulk UPDATE for {} recipients (campaignId={}) at {}",
+                    results.size(), campaignId,
                     LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss.SSS")));
 
-            for (RecipientResult r : results) {
-                Recipient rec = r.getRecipient();
+            int updated = 0;
+            int skipped = 0;
 
-                reportRepository.updateSendResult(
-                        rec.getBroadcastId(),
-                        rec.getNumber(),
-                        r.getMessageId(),
-                        r.getMessageStatus(),
-                        r.getWaId(),
-                        r.getStatus(),
-                        toJson(rec.getPayload())
+            for (MessageResultCallbackRequest.RecipientResultDto r : results) {
+                if (r.getBroadcastId() == null || r.getMobile() == null) {
+                    log.warn("Skipping result with null broadcastId or mobile: {}", r);
+                    skipped++;
+                    continue;
+                }
+
+                String status = r.isSuccess() ? "sent" : "failed";
+                String messageStatus = r.getMessageStatus() != null ? r.getMessageStatus() : status;
+                String messageId = r.getProviderMessageId();
+
+                // Deduplication: skip if this wamid was already stored
+                // (handles Kafka redelivery after crash)
+                if (messageId != null) {
+                    boolean alreadyExists = reportRepository
+                            .findByBroadcastIdAndMobile(r.getBroadcastId(), r.getMobile())
+                            .map(report -> messageId.equals(report.getMessageId()))
+                            .orElse(false);
+
+                    if (alreadyExists) {
+                        log.debug("Skipping duplicate wamid={} for broadcastId={} mobile={}",
+                                messageId, r.getBroadcastId(), r.getMobile());
+                        skipped++;
+                        continue;
+                    }
+                }
+
+                int rows = reportRepository.updateSendResult(
+                        r.getBroadcastId(),
+                        r.getMobile(),
+                        messageId,
+                        messageStatus,
+                        null, // waId — not provided in callback, can be added if needed
+                        status,
+                        r.getPayload()
                 );
+
+                if (rows > 0) {
+                    updated++;
+                } else {
+                    log.warn("No report row found for broadcastId={} mobile={}",
+                            r.getBroadcastId(), r.getMobile());
+                }
             }
 
-            log.info("Bulk UPDATE completed at {}",
+            log.info("Bulk UPDATE completed: updated={} skipped={} total={} at {}",
+                    updated, skipped, results.size(),
                     LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss.SSS")));
 
         } catch (Exception e) {
-            log.error("SQL Error during bulk update: {}", e.getMessage(), e);
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    //  HELPER
-    // ════════════════════════════════════════════════════════════════════════
-
-    private String toJson(Map<String, Object> payload) {
-        try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (Exception e) {
-            log.warn("Failed to serialize payload to JSON: {}", e.getMessage());
-            return "null";
+            log.error("SQL Error during bulk update for campaignId={}: {}", campaignId, e.getMessage(), e);
         }
     }
 }

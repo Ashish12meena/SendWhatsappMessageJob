@@ -1,11 +1,19 @@
+
 spring:
   application:
     name: WhatsappMessage
 
+  # ── Database ─────────────────────────────────────────────────────────
   datasource:
     url: jdbc:mysql://localhost:3306/aigreentick
     username: root
     password: meenagaming12@#
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000        # 5 minutes
+      connection-timeout: 30000   # 30 seconds
+      max-lifetime: 1800000       # 30 minutes
 
   jpa:
     hibernate:
@@ -13,8 +21,84 @@ spring:
     properties:
       hibernate:
         jdbc:
-          batch_size: 50        # batches N updates into fewer DB round-trips
-        order_updates: true     # groups same-table updates together for batching
+          batch_size: 50          # batches N updates into fewer DB round-trips
+        order_updates: true       # groups same-table updates together for batching
+    show-sql: false
+
+  # ── Kafka Producer Configuration ─────────────────────────────────────
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+    producer:
+      # Serializers
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+      # Reliability — all replicas must ack before success
+      acks: all
+
+      # Retries on transient failures (network blips, leader election)
+      retries: 3
+
+      # Idempotent producer — prevents duplicate messages on retry
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+        # Batching — accumulate messages before sending for throughput
+        batch.size: 65536             # 64KB batch size
+        linger.ms: 10                 # wait up to 10ms to fill batch
+        buffer.memory: 33554432       # 32MB total buffer memory
+
+        # Compression — reduces network bandwidth
+        compression.type: lz4
+
+        # Timeout — how long producer waits for ack from broker
+        request.timeout.ms: 30000     # 30 seconds
+        delivery.timeout.ms: 120000   # 2 minutes (includes retries)
+
+# ── Kafka Topics ───────────────────────────────────────────────────────
+kafka:
+  topics:
+    outbound-messages: whatsapp.broadcast.dispatch
+
+# ── Broadcast Batch Config ─────────────────────────────────────────────
+# Max recipients per Kafka message. Broadcast Service processes each
+# message as one batch, partitioned into windows of 50.
+# 1000 recipients = ~12-13 windows per Kafka message.
+broadcast:
+  batch-size: 1000
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SERVER CONFIG
+# ═══════════════════════════════════════════════════════════════════════
 
 server:
   port: 8080
+  shutdown: graceful
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LOGGING
+# ═══════════════════════════════════════════════════════════════════════
+
+logging:
+  level:
+    root: INFO
+    com.aigrenntick.service.WhatsappMessage: INFO
+    com.aigrenntick.service.WhatsappMessage.kafka: INFO
+    com.aigrenntick.service.WhatsappMessage.service: INFO
+    com.aigrenntick.service.WhatsappMessage.controller: INFO
+
+    # Kafka producer internals
+    org.apache.kafka: WARN
+    org.apache.kafka.clients.producer.ProducerConfig: WARN
+
+    # Spring Kafka
+    org.springframework.kafka: INFO
+
+    # JPA / Hibernate
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql: WARN
+
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
