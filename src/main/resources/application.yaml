@@ -1,4 +1,3 @@
-
 spring:
   application:
     name: WhatsappMessage
@@ -25,56 +24,73 @@ spring:
         order_updates: true       # groups same-table updates together for batching
     show-sql: false
 
-  # ── Kafka Producer Configuration ─────────────────────────────────────
+  # ── Kafka ─────────────────────────────────────────────────────────────
   kafka:
     admin:
       auto-create: true
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
     producer:
-      # Serializers
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-
-      # Reliability — all replicas must ack before success
       acks: all
-
-      # Retries on transient failures (network blips, leader election)
       retries: 3
-
-      # Idempotent producer — prevents duplicate messages on retry
       properties:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
-
-        # Batching — accumulate messages before sending for throughput
-        batch.size: 65536             # 64KB batch size
-        linger.ms: 10                 # wait up to 10ms to fill batch
-        buffer.memory: 33554432       # 32MB total buffer memory
-
-        # Compression — reduces network bandwidth
+        batch.size: 65536             # 64KB
+        linger.ms: 10
+        buffer.memory: 33554432       # 32MB
         compression.type: lz4
+        request.timeout.ms: 30000
+        delivery.timeout.ms: 120000
 
-        # Timeout — how long producer waits for ack from broker
-        request.timeout.ms: 30000     # 30 seconds
-        delivery.timeout.ms: 120000   # 2 minutes (includes retries)
+    consumer:
+      group-id: webhook-status-processor
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 500
+      properties:
+        max.poll.interval.ms: 300000  # 5 min — generous for backpressure pauses
+        session.timeout.ms: 30000
+        heartbeat.interval.ms: 10000
 
 # ── Kafka Topics ───────────────────────────────────────────────────────
 kafka:
   topics:
-    outbound-messages: whatsapp.broadcast.dispatch   
+    # Broadcast dispatch (existing)
+    outbound-messages: whatsapp.broadcast.dispatch
+    # Webhook status pipeline (new)
+    status-inbound: whatsapp.status.inbound
+    status-retry-1: whatsapp.status.retry.1
+    status-retry-2: whatsapp.status.retry.2
+    status-retry-3: whatsapp.status.retry.3
+    status-dlq:     whatsapp.status.dlq
+
+# ── Webhook Accumulator & Retry Config ────────────────────────────────
+webhook:
+  accumulator:
+    buffer-capacity: 50000
+    pause-threshold-percent: 80   # pause consumer when buffer >= 40,000
+    resume-threshold-percent: 50  # resume consumer when buffer <= 25,000
+    flush-count: 1000             # flush batch on 1000 events
+    flush-interval-ms: 3000       # flush batch every 3 seconds regardless
+  retry:
+    delays:
+      retry-1-ms: 3000
+      retry-2-ms: 6000
+      retry-3-ms: 12000
+    max-retries: 3
 
 # ── Broadcast Batch Config ─────────────────────────────────────────────
-# Max recipients per Kafka message. Broadcast Service processes each
-# message as one batch, partitioned into windows of 50.
-# 1000 recipients = ~12-13 windows per Kafka message.
 broadcast:
   batch-size: 1000
 
 # ═══════════════════════════════════════════════════════════════════════
-#  SERVER CONFIG
+#  SERVER
 # ═══════════════════════════════════════════════════════════════════════
-
 server:
   port: 8080
   shutdown: graceful
@@ -82,7 +98,6 @@ server:
 # ═══════════════════════════════════════════════════════════════════════
 #  LOGGING
 # ═══════════════════════════════════════════════════════════════════════
-
 logging:
   level:
     root: INFO
@@ -90,17 +105,10 @@ logging:
     com.aigrenntick.service.WhatsappMessage.kafka: INFO
     com.aigrenntick.service.WhatsappMessage.service: INFO
     com.aigrenntick.service.WhatsappMessage.controller: INFO
-
-    # Kafka producer internals
     org.apache.kafka: WARN
     org.apache.kafka.clients.producer.ProducerConfig: WARN
-
-    # Spring Kafka
     org.springframework.kafka: INFO
-
-    # JPA / Hibernate
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql: WARN
-
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
