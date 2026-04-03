@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -21,14 +22,13 @@ import java.util.Map;
 /**
  * Kafka consumer configuration for the webhook status pipeline.
  *
- * Separate from any existing Kafka config — named bean
- * "webhookKafkaListenerContainerFactory" to avoid conflicts.
+ * Named factory "webhookKafkaListenerContainerFactory" — avoids conflicts
+ * with any existing Kafka config in the project.
  *
- * Key settings:
- *  - MANUAL_IMMEDIATE ack mode: offset committed only after accumulator.add()
- *  - concurrency = 3: 3 threads each owning 4 of the 12 partitions
- *  - DefaultErrorHandler with FixedBackOff(0, 0): no local retry —
- *    deserialization failures go directly to DLQ via DeadLetterPublishingRecoverer
+ * BackpressureManager wiring:
+ *  BackpressureManager injects KafkaListenerEndpointRegistry and resolves
+ *  the container at runtime by listener ID "webhookInboundListener".
+ *  This avoids circular dependency issues at startup.
  */
 @Slf4j
 @Configuration
@@ -46,6 +46,8 @@ public class KafkaConsumerConfig {
     @Value("${kafka.topics.status-dlq:whatsapp.status.dlq}")
     private String dlqTopic;
 
+    // ── Consumer Factory ──────────────────────────────────────────────
+
     @Bean
     public ConsumerFactory<String, String> webhookConsumerFactory() {
         Map<String, Object> props = new HashMap<>();
@@ -62,6 +64,8 @@ public class KafkaConsumerConfig {
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
+    // ── Listener Container Factory ────────────────────────────────────
+
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> webhookKafkaListenerContainerFactory(
             KafkaTemplate<String, String> kafkaTemplate) {
@@ -71,38 +75,29 @@ public class KafkaConsumerConfig {
 
         factory.setConsumerFactory(webhookConsumerFactory());
 
-        // Manual ack — offset committed explicitly in StatusEventConsumer after accumulator.add()
+        // Manual ack — offset committed explicitly after accumulator.add()
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
 
-        // 3 threads × 4 partitions each = 12 total (matches topic partition count)
-        // Increase concurrency only when partition count also increases
+        // 3 threads × 4 partitions = 12 total (matches inbound topic partition count)
         factory.setConcurrency(3);
 
-        // Poison message handling:
-        // FixedBackOff(0, 0) = 0 retries, 0 delay → fail immediately
-        // DeadLetterPublishingRecoverer sends to <topic>.DLT or our dlqTopic
+        // Poison message → DLQ directly, no local retry
         factory.setCommonErrorHandler(buildErrorHandler(kafkaTemplate));
 
         return factory;
     }
 
-    /**
-     * Error handler for unrecoverable errors (e.g. deserialization failure).
-     * No local retry — send directly to DLQ.
-     * DB failures are handled in StatusBatchProcessor, not here.
-     */
+    // ── Error Handler ─────────────────────────────────────────────────
+
     private DefaultErrorHandler buildErrorHandler(KafkaTemplate<String, String> kafkaTemplate) {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate,
-                // Always route to our DLQ regardless of source topic name
                 (record, ex) -> {
-                    log.error("Poison message — routing to DLQ. topic={} partition={} offset={} error={}",
+                    log.error("Poison message → DLQ. topic={} partition={} offset={} error={}",
                             record.topic(), record.partition(), record.offset(), ex.getMessage());
                     return new org.apache.kafka.common.TopicPartition(dlqTopic, 0);
                 }
         );
-
-        // 0 retries, 0 backoff — fail fast, let DLQ handle it
         return new DefaultErrorHandler(recoverer, new FixedBackOff(0L, 0L));
     }
 }
